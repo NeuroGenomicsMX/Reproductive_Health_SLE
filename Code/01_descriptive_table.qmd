@@ -1,0 +1,271 @@
+---
+title: "Reproductive health LupusRGMX"
+Author: "Ana Laura Hernández-Ledesma"
+Date: "24/03/2026"
+format: html
+editor: visual
+---
+
+## STEP 1: Loading required packages and reading database
+
+```{r }
+#| label: loading packages
+#| include: false
+
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(eeptools)
+
+Data <- read.csv("Base_Enero2026.csv", header=TRUE)
+```
+
+## STEP 2. Selecting and filtering data of interest
+
+```{r Selecting and filtering data of interest }
+data_curated <- Data %>%
+  filter(privacy_acceptance___1 == 1 &  (calculated_age >= 18 & calculated_age < 100)) %>% # To exclude ages miscalculated
+  filter(sex___1 != sex___2 & sex___2 != sex___1) %>% #to not get registries with both sex marked
+  filter(prednisolona != 7 | treatment___0 == 1 | treatment___1 == 1 | treatment___2 ==1 | treatment___3 ==1 | treatment___4 ==1 | treatment___5 ==1 | treatment___6 ==1 | treatment___7 ==1 | treatment___8 ==1 , preserve = TRUE) %>% #to exclude those without treatment
+  #filter(lupus == 2) %>% # to include only lupus
+  mutate(sex___1 = replace(sex___1, sex___1 == 1, "Women"))%>%
+  mutate(sex___1 = replace(sex___1, sex___1 == 0, "Men")) %>%
+  select(
+    #Demographic data
+    record_id,salud_reproductiva_timestamp,sex___1, birth_date, calculated_age, lupus,  home, ocupation, school, last_degree, socioeconomic_status, place_of_birth, adic_tabaco___1, bmi, ht_tabaco,
+    #Treatment
+    treatment___0, treatment___1, treatment___2, treatment___3, treatment___4,treatment___5, treatment___6, treatment___7, treatment___8, prednisolona, corticosteroids_dosis, pred_dosis,
+    #Clinical data
+    health_provider, comorbidities, nephritis, pregnancy,dx_time, family_sle, time_symptoms, sop___1,
+    #Reproductive health
+    pregnant:salud_reproductiva_complete,prematuro_sdg:ectopico_n, breastfeeding, pregnant, ectopico_n, pregn_smokequit_month_5,
+         prematuro_sdg:ectopico_n, pregnancy, pregnant, pregnancies, pregnancies_number, pregnancies,
+    #SLEDAI
+    sledai_points___1:sledai_points___25,
+    #LupusQoL
+    lupusqol_1:lupusqol_34,
+    #SLICC
+    slicc_1:slicc_38,
+    #Controls criteria
+    criterios_exclusion_4, autoimmunities, autoimmune_diseases___0, autoimmune_diseases___1,autoimmune_diseases___2,
+    autoimmune_diseases___3, autoimmune_diseases___7, autoimmune_diseases___10, metabolica_yn, diabetes___1,
+    reumatologica_yn, artritis_reumatoide___1, lupus_370998___1, esclerodermia___1, espondilitis_anquilosante___1
+    ) %>%
+  filter(salud_reproductiva_complete == "2")  %>% 
+  filter( calculated_age >= last_period_age) %>% ## eliminate incongruent data
+  mutate(prednisolona = ifelse(prednisolona == 7, 0, 1))  %>% # Change to 0 if they don't use cc and to 1 if they use
+  rename(sex=sex___1, Corticosteroids=prednisolona, Antimalarials=treatment___0, Glucocorticoids=treatment___1, Mycophenolate=treatment___2, Azatioprine=treatment___3, Metotrexate=treatment___4, Rituximab=treatment___5, Cyclosporine=treatment___6, Cyclophosphamide=treatment___7, Others=treatment___8, Menarca=period_age, Seizure=sledai_points___1, Psychosis=sledai_points___2, 'Organic brain syndome'=sledai_points___3, 
+         'Visual disturbance'=sledai_points___4, 'Cranial nerve disorder'=sledai_points___5, 'Lupus headache'=sledai_points___6, 
+         'Cerebrovascular accident'=sledai_points___7, Vasculitis=sledai_points___8, Arthritis=sledai_points___9, Myositis=sledai_points___10,
+         'Urinary Casts'=sledai_points___11, Hematuria=sledai_points___12, Proteinuria=sledai_points___13, Pyuria=sledai_points___14,
+         Rash=sledai_points___15, Alopecia=sledai_points___16, 'Mucosal ulcers'=sledai_points___17, 'Pleurisy'=sledai_points___18,
+         Pericarditis=sledai_points___19, 'Low complement'=sledai_points___20, 'Increased DNA binding'=sledai_points___21,
+         Fever=sledai_points___22, Thrombocytopenia=sledai_points___23, Leukopenia=sledai_points___24)
+
+## Calculate age at the moment of completing the questionnaire
+# Date format
+data_curated$birth_date <- as.Date(data_curated$birth_date)                # birth date
+data_curated$rh_date <- as.Date(data_curated$salud_reproductiva_timestamp)  # date of completing reproductive health questionnaire
+
+# Calculate age by the time of completing the questionnaire
+data_curated$calculated_age <- floor(
+  eeptools::age_calc(data_curated$birth_date, enddate = data_curated$rh_date, units="years"))
+
+# Eliminate women with inconsistencies regarding last period
+data_curated  <- data_curated %>%
+  filter( calculated_age >= last_period_age) # filter inconsistency: last period age greater than age at completing the questionnaire
+
+#Calculate age at dx
+data_curated$dx_age <- data_curated$calculated_age - data_curated$dx_time
+
+# Calculate time since last period
+data_curated$time_since_last_period <- data_curated$calculated_age - data_curated$last_period_age 
+
+# Calculte reproductive life
+data_curated$rep_life <- data_curated$last_period_age - data_curated$Menarca
+
+# Identify those with at least a year since their last period (amenhorrea)
+data_curated<- data_curated %>%
+  mutate(menst_status = (if_else(time_since_last_period >=1, "Amenhorrea", "Menstruating"))) 
+
+# Check data: to see if there are any biological unlikely results in rep_life
+data_replife <- data_curated %>%
+  select(calculated_age, Menarca, last_period_age, rep_life) 
+
+data_curated<- data_curated %>%
+  filter(rep_life > 0) # To eliminate any negative value
+
+# Classify according to menstruation status
+data_amenh_age <- data_curated %>%
+  filter(menst_status == "Amenhorrea")%>%
+  select(calculated_age, last_period_age)
+
+# Calculate age at last period for those with amenhorrea
+median_lpa <- median(data_amenh_age$last_period_age)
+median_lpa
+IQR_lpa <-quantile(data_amenh_age$last_period_age)
+IQR_lpa
+
+# Identify early-amenhorea
+data_curated$amenh  <- data_curated$calculated_age - data_curated$last_period_age
+data_curated <- data_curated%>%
+  mutate(amenh = replace(amenh, amenh >= 1 & last_period_age < 40, "Early-Amenhorrea")) %>%
+  mutate(amenh = replace(amenh, amenh >= 1 & last_period_age >= 40, "Amenhorrea")) %>%
+  mutate(amenh  = replace(amenh, amenh < 1, "Menstruating")) 
+
+```
+
+## STEP 3: SLEDAI and SLICC estimation
+
+```{r}
+### Calculating SLEDAI points
+## Points by manifestation according to SLEDAI criteria
+# Eight points weighted manifestations # If the px marked it assign 8 points
+data_curated$Seizure[data_curated$Seizure =="1"] <- "8" 
+data_curated$Psychosis[data_curated$Psychosis =="1"] <- "8" 
+data_curated$'Organic brain syndome'[data_curated$'Organic brain syndome' =="1"] <- "8" 
+data_curated$'Visual disturbance'[data_curated$'Visual disturbance' =="1"] <- "8" 
+data_curated$'Cranial nerve disorder'[data_curated$'Cranial nerve disorder' =="1"] <- "8" 
+data_curated$'Lupus headache'[data_curated$'Lupus headache' =="1"] <- "8" 
+data_curated$'Cerebrovascular accident'[data_curated$'Cerebrovascular accident' =="1"] <- "8" 
+data_curated$Vasculitis[data_curated$Vasculitis =="1"] <- "8" 
+
+# Four points weighted manifestations # If the px marked it assign 4 points
+data_curated$Arthritis[data_curated$Arthritis =="1"] <- "4" 
+data_curated$Myositis[data_curated$Myositis =="1"] <- "4" 
+data_curated$'Urinary Cast'[data_curated$'Urinary Cast' =="1"] <- "4" 
+data_curated$Hematuria[data_curated$Hematuria =="1"] <- "4" 
+data_curated$Proteinuria[data_curated$Proteinuria =="1"] <- "4" 
+data_curated$Pyuria[data_curated$Pyuria =="1"] <- "4" 
+
+# Two points weighted manifestations # If the px marked it assign 2 points
+data_curated$Rash[data_curated$Rash =="1"] <- "2" 
+data_curated$Alopecia[data_curated$Alopecia =="1"] <- "2" 
+data_curated$'Mucosal ulcers'[data_curated$'Mucosal ulcers' =="1"] <- "2" 
+data_curated$Pleurisy[data_curated$Pleurisy =="1"] <- "2" 
+data_curated$Pericarditis[data_curated$Pericarditis =="1"] <- "2" 
+data_curated$'Low complement'[data_curated$'Low complement' =="1"] <- "2" 
+data_curated$'Increased DNA binding'[data_curated$'Increased DNA binding' =="1"] <- "2" 
+
+## The manifestations weighted with one point will be kept as in the original data
+## Data preparation
+sledaisum <- data_curated %>%
+  select( "Seizure", "Psychosis", "Organic brain syndome", "Visual disturbance", "Cranial nerve disorder","Lupus headache", "Cerebrovascular accident","Vasculitis","Arthritis", "Myositis",  "Urinary Casts",  "Hematuria", "Proteinuria", "Pyuria", "Rash", "Alopecia", "Mucosal ulcers", "Pleurisy", "Pericarditis","Low complement","Increased DNA binding","Fever","Thrombocytopenia","Leukopenia")  
+
+sledaisum$Seizure <- as.numeric(as.character(sledaisum$Seizure))
+sledaisum$Psychosis <- as.numeric(as.character(sledaisum$Psychosis))
+sledaisum$"Organic brain syndome" <- as.numeric(as.character(sledaisum$"Organic brain syndome"))
+sledaisum$"Visual disturbance" <- as.numeric(as.character(sledaisum$"Visual disturbance"))
+sledaisum$"Cranial nerve disorder" <- as.numeric(as.character(sledaisum$"Cranial nerve disorder"))
+sledaisum$"Lupus headache" <- as.numeric(as.character(sledaisum$"Lupus headache"))
+sledaisum$"Cerebrovascular accident" <- as.numeric(as.character(sledaisum$"Cerebrovascular accident"))
+sledaisum$Vasculitis <- as.numeric(as.character(sledaisum$Vasculitis))
+sledaisum$Arthritis <- as.numeric(as.character(sledaisum$Arthritis))
+sledaisum$Myositis <- as.numeric(as.character(sledaisum$Myositis))
+sledaisum$"Urinary Casts" <- as.numeric(as.character(sledaisum$"Urinary Casts"))
+sledaisum$Hematuria <- as.numeric(as.character(sledaisum$Hematuria))
+sledaisum$Proteinuria <- as.numeric(as.character(sledaisum$Proteinuria))
+sledaisum$Pyuria <- as.numeric(as.character(sledaisum$Pyuria))
+sledaisum$Rash <- as.numeric(as.character(sledaisum$Rash))
+sledaisum$Alopecia <- as.numeric(as.character(sledaisum$Alopecia))
+sledaisum$"Mucosal ulcers" <- as.numeric(as.character(sledaisum$"Mucosal ulcers"))
+sledaisum$Pleurisy <- as.numeric(as.character(sledaisum$Pleurisy))
+sledaisum$Pericarditis <- as.numeric(as.character(sledaisum$Pericarditis))
+sledaisum$"Low complement" <- as.numeric(as.character(sledaisum$"Low complement"))
+sledaisum$"Increased DNA binding" <- as.numeric(as.character(sledaisum$"Increased DNA binding"))
+sledaisum$Fever <- as.numeric(as.character(sledaisum$Fever))
+sledaisum$Thrombocytopenia <- as.numeric(as.character(sledaisum$Thrombocytopenia))
+sledaisum$Leukopenia <- as.numeric(as.character(sledaisum$Leukopenia))
+sledaisum$total <- rowSums(sledaisum[ ,1:24])
+data_curated$sledai_total<- sledaisum$total
+
+## Classification by disease activity 
+data_curated<- data_curated %>%
+  mutate(disease_act = (if_else(sledai_total >=6, "With activity", "Without activity"))) 
+
+### SLICC
+data_curated$slicc_total <- rowSums(data_curated[, paste0("slicc_", 1:38)], na.rm = TRUE)
+data_curated$slicc_group<- ifelse(
+  data_curated$slicc_total == 0, "Without damage",
+  ifelse(data_curated$slicc_total <= 2, "Mild damage","High damage"))
+
+```
+
+## STEP 4: Descriptive analysis
+
+```{r}
+descriptive_df <- data_curated %>% 
+  select(
+    calculated_age, 
+    # SLE
+    lupus, dx_time, time_symptoms, Antimalarials, Corticosteroids, comorbidities,  nephritis, sledai_total, slicc_total,
+    # Reproductive
+    pregnant, pregnancies,  Menarca, cycle_regularity, histerectomy,ooforectomy, pregnancies, pregnancies_number, sop___1, contraceptives, amenh, last_period_age, menst_status, rep_life, last_period_age, 
+    preeclampsie,preeclampsie_2,preeclampsie_3, preeclampsie_4, preeclampsie_5,
+    # Reproductive medical history
+    enf_hipertensiva_embarazo___1, diabetes_gestacional___1,
+    aborto___1, ectopico___1,
+    #Controls criteria
+    criterios_exclusion_4, autoimmunities, autoimmune_diseases___0, autoimmune_diseases___1,autoimmune_diseases___2,
+    autoimmune_diseases___3, autoimmune_diseases___7, autoimmune_diseases___10, metabolica_yn, diabetes___1,
+    reumatologica_yn, artritis_reumatoide___1, lupus_370998___1, esclerodermia___1, espondilitis_anquilosante___1)%>%
+ mutate(
+    # time_symptoms recoding
+    time_symptoms = case_when(
+      time_symptoms == "0" ~ "< 6 months",
+      time_symptoms == "1" ~ "6 months–1 year",
+      time_symptoms == "2" ~ "1 year",
+      time_symptoms == "3" ~ "2 years",
+      time_symptoms == "4" ~ "3 years",
+      time_symptoms == "5" ~ "4 years",
+      time_symptoms == "6" ~ "> 5 years",
+      time_symptoms == "7" ~ "> 10 years",
+      TRUE ~ NA_character_),
+    # binary variables
+    nephritis = if_else(nephritis == 1, "Yes", "No"),
+    pregnancy = if_else(pregnancies == 1, "Yes", "No"),
+    preeclampsie = if_else(preeclampsie ==1,"1", "0"),
+    preeclampsie_2 = if_else(preeclampsie_2 ==1,"1", "0"),
+    preeclampsie_3 = if_else(preeclampsie_3 ==1,"1", "0"),
+    preeclampsie_4 = if_else(preeclampsie_4 ==1,"1", "0"),
+    preeclampsie_5 = if_else(preeclampsie_5 ==1,"1", "0"),
+    # comorbidities recoding
+    comorbidities = case_when(
+      comorbidities == 1 ~ "Diabetes mellitus",
+      comorbidities == 2 ~ "Hypertension",
+      comorbidities == 3 ~ "Cancer",
+      comorbidities == 4 ~ "Cardiovascular disease",
+      comorbidities == 5 ~ "Osteoporosis",
+      comorbidities == 6 ~ "Rheumatoid arthritis",
+      comorbidities == 7 ~ "Multiple sclerosis",
+      comorbidities == 8 ~ "Thyroid disease",
+      comorbidities == 9 ~ "Other",
+      comorbidities == 11 ~ "None",
+      TRUE ~ NA_character_),
+    # cycle_regularity recoding
+    cycle_regularity = case_when(
+      cycle_regularity == 0 ~ "No",
+      cycle_regularity == 1 ~ "Yes",
+      cycle_regularity == 2 ~ "Unknown",
+      TRUE ~ NA_character_))
+
+# Change all NAs to 0 in preeclampies columns
+cols <- c("preeclampsie","preeclampsie_2","preeclampsie_3","preeclampsie_4", 
+          "preeclampsie_5")
+descriptive_df[cols] <- lapply(descriptive_df[cols], function(x) {
+  x[is.na(x)] <- 0
+  return(x)})
+
+# Summarize complications by volunteeer
+descriptive_df[cols] <- lapply(descriptive_df[cols], function(x) {
+  as.numeric(as.character(x))}) #Changes to character
+
+descriptive_df$complications <- rowSums(descriptive_df[, c("preeclampsie","preeclampsie_2","preeclampsie_3","preeclampsie_4","preeclampsie_5")], na.rm = TRUE)
+
+descriptive_df <- descriptive_df %>% 
+ mutate(
+    complications = if_else(complications >= 1, "1", "0"))
+  
+write.csv(descriptive_df, "~/Documents/R/Reproductive_Health/Table1_df.csv")
+
+```
