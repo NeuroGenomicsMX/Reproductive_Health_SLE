@@ -1,0 +1,245 @@
+---
+title: "Reproductive health LupusRGMX"
+format: html
+editor: visual
+---
+
+## STEP 1: Loading required packages and reading database
+
+```{r }
+#| label: loading packages
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(visdat)
+library(gtsummary)
+library(gt)
+library(patchwork)
+library(tidyr)
+library(scales)
+library(broom)
+
+data_curated <- read.csv("Data_curated.csv", header=TRUE)
+```
+
+## STEP 2. Selecting and filtering data of interest
+
+```{r Selecting and filtering data of interest }
+data_amen<- data_curated  %>%
+  select(
+    #Outcomes
+    last_period_age, 
+    #Demographic data and lifestyle
+    calculated_age, socioeconomic_status, adic_tabaco___1, bmi, 
+    #Treatment
+    Corticosteroids, Antimalarials,Mycophenolate, Cyclophosphamide, Azatioprine, Rituximab, pred_dosis,
+    #Clinical data
+    nephritis, dx_time, time_symptoms,
+    #Reproductive health
+    Menarca,pregnancies, last_period, last_period_age, amenh, histerectomy, menst_status, ooforectomy,
+    #SLEDAI
+    sledai_total,
+    #SLICC
+    slicc_total)
+
+```
+
+## STEP 3: Descriptive analysis
+
+```{r}
+data_amen_clean <- data_amen %>%
+  filter(
+    histerectomy == 0,
+    ooforectomy == 0
+  )
+
+## Descriptive by menstruation status
+table5 <- data_amen_clean %>% 
+  tbl_summary(
+    by= amenh, 
+    include = c(last_period_age,calculated_age, socioeconomic_status, adic_tabaco___1, 
+                bmi, Corticosteroids, Antimalarials,Mycophenolate, Cyclophosphamide,
+                Azatioprine, Rituximab, pred_dosis, nephritis, dx_time, time_symptoms,
+                Menarca,pregnancies, last_period_age, amenh,
+                sledai_total, slicc_total))%>%  
+  add_p() %>% 
+  add_overall() %>%
+  add_n() %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_spanning_header(c("stat_1", "stat_2","stat_3") ~ "**Menstruation status**") %>%
+  modify_footnote_header("Median (IQR) or Frequency (%)", columns = all_stat_cols()) %>%
+  modify_caption("**Table 5. Volunteers' characteristics by Menstruation status**") %>%
+  bold_labels()
+gt::gtsave(as_gt(table5), "Table5_MenstruationStatus.docx")
+
+```
+
+## STEP 4: Analyses for early amenorrhea
+
+```{r}
+## Disease duration by menstrual status
+df_dxtime <- data_amen_clean %>%
+  filter(amenh %in% c("Menstruating", 
+                      "Early-Amenhorrea", 
+                      "Amenhorrea")) %>%
+  mutate(amenh = factor(amenh,
+                   levels = c("Menstruating",
+                              "Early-Amenhorrea",
+                              "Amenhorrea"),
+                   labels = c("Menstruating",
+                              "Early\namenorrhea",
+                              "Amenorrhea")))
+
+fig5a <- ggplot(df_dxtime, aes(x = amenh, y = dx_time)) +
+  geom_boxplot(width = 0.6, outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.4, size = 2) +
+  theme_classic(base_size = 14) +
+  labs(
+    x = "",
+    y = "Disease duration (years)",
+    title = "A. Disease duration according  \n to menstrual status") +
+  theme(
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(size = 12))
+fig5a
+
+## Primary analysis: penalized logistic regression (Firth model)
+# Prepare database
+df_model <- data_amen_clean %>%
+  filter(amenh %in% c("Menstruating", "Early-Amenhorrea")) %>%
+  mutate(early_amenorrhea_binary = ifelse(amenh== "Early-Amenhorrea", 1, 0))
+
+# Run model 
+model_firth <- logistf(
+  early_amenorrhea_binary ~ dx_time + calculated_age,
+  data = df_model)
+
+summary(model_firth)
+
+# Create tidy df
+coef_df <- data.frame(
+  term = c("Disease duration", "Age"),
+  estimate = exp(model_firth$coefficients[-1]),
+  conf.low = exp(model_firth$ci.lower[-1]),
+  conf.high = exp(model_firth$ci.upper[-1]),
+  p.value = model_firth$prob[-1])
+
+# Significancy
+coef_df <- coef_df %>%
+  mutate(
+    p_label = paste0("p = ", formatC(p.value, format = "f", digits = 3)))
+
+# Create OR label
+coef_df <- coef_df %>%
+  mutate(
+    OR_label = paste0(round(estimate, 2),
+                      " (", round(conf.low, 2),
+                      "–", round(conf.high, 2), ")"))
+
+# Plotting
+fig5b <- ggplot(coef_df,
+             aes(x = estimate,
+                 y = term)) +
+  geom_point(size = 3, shape = 16, color = "#7A3E9D") +
+  geom_errorbarh(aes(xmin = conf.low,
+                     xmax = conf.high),
+                     height = 0.2,
+                 color = "#7A3E9D") +
+  geom_vline(xintercept = 1,
+             linetype = "dashed",
+             color = "gray40") +
+  geom_text(
+    aes(label = OR_label),
+    nudge_x = 0.06,
+    size = 4) +
+  scale_x_log10(limits = c(1, 1.3)) +
+  theme_classic(base_size = 14) +
+  labs(
+    x = "Adjusted odds ratio (log scale)",
+    y = "",
+    title = "B. Factors associated  \n with early amenorrhea") +
+   theme(
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold"),
+    axis.line.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    plot.title = element_text(hjust = 0.5, face = "bold"))
+fig5b
+
+## Predicted probability curve
+# Creat dataset
+mean_age <- mean(df_model$calculated_age, na.rm = TRUE)
+
+newdata <- data.frame(
+  dx_time = seq(min(df_model$dx_time, na.rm = TRUE),
+                max(df_model$dx_time, na.rm = TRUE),
+                length.out = 100),
+  calculated_age = mean_age)
+
+# Prediction
+pred <- predict(model_firth, newdata = newdata, se.fit = TRUE)
+newdata$fit <- pred$fit
+newdata$se <- pred$se.fit
+
+# Convert to probability scale
+newdata$prob <- plogis(newdata$fit)
+newdata$lower <- plogis(newdata$fit - 1.96 * newdata$se)
+newdata$upper <- plogis(newdata$fit + 1.96 * newdata$se)
+
+# Plotting
+fig5c <- ggplot(newdata, aes(x = dx_time, y = prob)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper),
+              alpha = 0.2,
+              fill = "#7A3E9D") +
+  geom_line(size = 1.2, color = "#7A3E9D") +
+  theme_classic(base_size = 14) +
+  labs(
+    x = "Disease duration (years)",
+    y = "Predicted probability \n of early amenorrhea",
+    title = "C. Predicted probability of early amenorrhea by disease duration \n (age fixed at mean)") +
+  theme(
+    plot.title = element_text(face = "bold"))
+fig5c
+
+# Fig5. Characteristics by complications
+fig5 <- (fig5a | fig5b)  /
+        (fig5c) 
+fig5
+
+## Save plot as png
+ggsave(filename= "~/Documents/R/Reproductive_Health/Fig5.png", plot= fig5, width = 10, height = 6, dpi=300, units = "in", bg = "white" ) 
+
+## Sensitivity analysis: Standard logistic regression
+# Unadjusted model
+model_unadj <- glm(
+  early_amenorrhea_binary ~ dx_time,
+  family = binomial(),
+  data = df_model)
+
+exp(cbind(
+  OR = coef(model_unadj),
+  confint.default(model_unadj)))  # Wald CI for consistency
+
+# Age-adjusted model
+model_adj_age <- glm(
+  early_amenorrhea_binary ~ dx_time + calculated_age,
+  family = binomial(),
+  data = df_model)
+
+exp(cbind(
+  OR = coef(model_adj_age),
+  confint.default(model_adj_age)))
+
+## Correlation between age and disease duration
+cor_age_duration <- cor(
+  df_model$calculated_age,
+  df_model$dx_time,
+  use = "complete.obs")
+cor_age_duration
+
+# Results were consistent between penalized and standard models.
+
+
+```
+
+## 
