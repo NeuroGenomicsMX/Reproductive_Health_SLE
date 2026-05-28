@@ -1,0 +1,9 @@
+"record_ID","country","sex","cell_number","email","calculated_age","age_at_survey","period_age","last_period","last_period_age","cycle_regularity","pregnant","pregnancies","pregnancies_number","pregn_compl","pregn_end","pregn_end_2","pregn_end_3","pregn_end_4","pregn_end_5","preeclampsie","preeclampsie_2","preeclampsie_3","preeclampsie_4","preeclampsie_5","aborto","enf_hipertensiva_embarazo","diabetes_gestacional","ectopico","histerectomy","ooforectomy","sop","contraceptives","PlaceOfBirth","na_count"
+20,5,"woman",5535667671,"maritrini99@hotmail.com",42,41,12,1,42,1,0,1,2,0,0,0,0,0,FALSE,0,0,0,0,FALSE,0,0,0,0,0,0,0,0,30,0
+223,5,"woman",4428805167,"b.andrea.lozano@gmail.com",29,28,9,1,29,1,0,0,0,0,0,0,0,0,FALSE,0,0,0,0,FALSE,0,0,0,0,0,0,0,0,22,0
+243,5,"woman",3118472509,"greletsp27@gmail.com",23,22,11,1,23,0,0,0,0,0,0,0,0,0,FALSE,0,0,0,0,FALSE,0,0,0,0,0,0,0,0,18,0
+274,5,"woman",3118472509,"greletsp27@gmail.com",22,22,11,0,20,1,0,0,0,0,0,0,0,0,FALSE,0,0,0,0,FALSE,0,0,0,0,0,0,0,0,18,0
+448,5,"woman",4428805167,"b.andrea.lozano@gmail.com",29,28,9,1,29,1,0,0,0,0,0,0,0,0,FALSE,0,0,0,0,FALSE,0,0,0,0,0,0,0,0,22,0
+3485,5,"woman",5535667671,"maritrini99@hotmail.com",43,43,11,1,43,1,0,1,2,0,0,0,0,0,FALSE,0,0,0,0,FALSE,0,0,0,0,0,0,0,0,30,0
+4908,5,"woman",7471315472,"luckymondragon@gmail.com",61,61,12,0,12,1,0,1,3,0,0,0,0,0,FALSE,0,0,0,0,FALSE,0,0,0,0,1,0,0,0,13,0
+4909,5,"woman",7471315472,"luckymondragon@gmail.com",61,61,12,0,50,1,0,1,3,0,0,0,0,0,FALSE,0,0,0,0,FALSE,0,0,0,0,1,0,0,0,13,0
