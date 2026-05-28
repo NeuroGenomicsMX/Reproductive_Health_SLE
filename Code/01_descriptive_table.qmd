@@ -265,7 +265,7 @@ descriptive_df$complications <- rowSums(descriptive_df[, c("preeclampsie","preec
 descriptive_df <- descriptive_df %>% 
  mutate(
     complications = if_else(complications >= 1, "1", "0"))
-  
+
 write.csv(descriptive_df, "~/Documents/R/Reproductive_Health/Table1_df.csv")
 
 ```
