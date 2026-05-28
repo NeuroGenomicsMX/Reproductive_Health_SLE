@@ -1,10 +1,18 @@
-# Reproductive_Health_SLE
-This repository contains the analysis focused on reproductive health chracteristics of women from the Mexican Lupus Registry (LupusRGMX).
+# Reproductive Health Analysis in Women from LupusRGMX
 
--"Main_Scripts" contains the scripts used for the analyses focused only on data from women with SLE.
+This repository contains the analyses focused on reproductive health characteristics of women enrolled in the Mexican Lupus Registry (LupusRGMX).
 
--"Figures" contains the figures included in the manuscript.
+## Repository Structure
 
--"SuppFigures" contains the figures included as supplementary material
+* **Main_Scripts/**
+  Contains the scripts used for analyses performed exclusively on data from women with systemic lupus erythematosus (SLE).
 
--"Control comparison" contains the scripts and results recovered from the comparation of data from women with and without SLE. 
+* **Figures/**
+  Includes the figures presented in the main manuscript.
+
+* **SuppFigures/**
+  Contains supplementary figures associated with the manuscript.
+
+* **Control_comparison/**
+  Includes the scripts and results obtained from comparative analyses between women with and without SLE.
+
