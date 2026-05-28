@@ -1,0 +1,722 @@
+---
+title: "2.Pregnancy evolution and complications analysis"
+format: html
+editor: visual
+---
+
+## STEP 1: Loading required packages and reading database
+
+```{r }
+#| label: loading packages
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(UpSetR)
+library(cowplot)
+library(reshape2)
+library(visdat)
+library(gtsummary)
+library(gt)
+library(patchwork)
+library(tidyr)
+library(scales)
+library(broom)
+library(ggsankey)
+library(Hmisc)
+library(corrplot)
+library(ggplotify)
+
+#data_curated is recovered from script 01_descriptives.qmd
+
+# Set the color palette for specific sub-ancestries, using https://colorbrewer2.org/#type=diverging&scheme=BrBG&n=9 colorblind options
+col_palette  <- c(
+  "#2C6BA0", "#E9C46A", "#C1121F",
+  "#F4A261", "#B22222","#E76F51","#e0ecf4",
+  "#2A9D8F","#E6D3A3", "#C7B8EA"
+)
+
+names(col_palette) <- c(
+  "Full term", "Pregnancy losses","Preterm",
+  "Preeclampsie","Eclampsie","HELLP", "None",
+  "1","2","≥3")
+scales::show_col(col_palette)
+
+```
+
+## STEP 2. Selecting and filtering data of interest
+
+```{r Selecting and filtering data of interest }
+data_pregn <- data_curated  %>%
+  select(
+    #Demographic data
+    record_id, calculated_age, socioeconomic_status, adic_tabaco___1, bmi, ht_tabaco,
+    #Treatment
+    Corticosteroids, Antimalarials,Mycophenolate, Metotrexate, Cyclophosphamide, Azatioprine, Rituximab, pred_dosis,
+    #Clinical data
+    health_provider, comorbidities, nephritis, pregnancy, dx_time, family_sle, time_symptoms, sop___1,
+    #Reproductive health
+    pregnant:salud_reproductiva_complete,prematuro_sdg:ectopico_n, breastfeeding, pregnant, ectopico_n, pregn_smokequit_month_5,
+         prematuro_sdg:ectopico_n, pregnancy, pregnant, pregnancies, pregnancies_number, pregnancies, rep_life,
+    #SLEDAI
+    sledai_total,
+    #SLICC
+    slicc_total
+    ) %>%
+  filter(pregnancies == "1") 
+
+```
+
+## STEP 3: Information regarding pregnancies
+
+```{r}
+## Convert pregnancy outcome to long format
+preg_long <- data_pregn %>%
+  select(record_id,
+         pregn_end,
+         pregn_end_2,
+         pregn_end_3,
+         pregn_end_4,
+         pregn_end_5) %>%
+  pivot_longer(
+    cols = starts_with("pregn_end"),
+    names_to = "pregnancy_number",
+    values_to = "outcome")
+
+## Clean pregnancy number
+preg_long <- preg_long %>%
+  mutate(
+    pregnancy_number = case_when(
+      pregnancy_number == "pregn_end" ~ 1,
+      pregnancy_number == "pregn_end_2" ~ 2,
+      pregnancy_number == "pregn_end_3" ~ 3,
+      pregnancy_number == "pregn_end_4" ~ 4,
+      pregnancy_number == "pregn_end_5" ~ 5))
+
+## Remove non-existing pregnancies
+preg_long <- preg_long %>%
+  filter(!is.na(outcome))
+
+## Add complications during pregnancy (0= No, 1= Yes, 2=Unknown)
+comp_long <- data_pregn %>%
+  select(record_id,
+         preeclampsie,
+         preeclampsie_2,
+         preeclampsie_3,
+         preeclampsie_4,
+         preeclampsie_5) %>%
+  pivot_longer(
+    cols = starts_with("preeclampsie"),
+    names_to = "pregnancy_number",
+    values_to = "complication") %>%
+  mutate(
+    pregnancy_number = case_when(
+      pregnancy_number == "preeclampsie" ~ 1,
+      pregnancy_number == "preeclampsie_2" ~ 2,
+      pregnancy_number == "preeclampsie_3" ~ 3,
+      pregnancy_number == "preeclampsie_4" ~ 4,
+      pregnancy_number == "preeclampsie_5" ~ 5))
+
+## Merge outcome + complications
+preg_long <- preg_long %>%
+  left_join(comp_long,
+            by = c("record_id", "pregnancy_number"))
+
+## Add type of complications during pregnancy (0=preeclampsie, 1= eclampie, 2=HELLP)
+comp2_long <- data_pregn %>%
+  select(record_id,
+         pregn_compl,
+         pregn_compl_2,
+         pregn_compl_3,
+         pregn_compl_4,
+         pregn_compl_5) %>%
+  pivot_longer(
+    cols = starts_with("pregn_compl"),
+    names_to = "pregnancy_number",
+    values_to = "complication_type") %>%
+  mutate(
+    pregnancy_number = case_when(
+      pregnancy_number == "pregn_compl" ~ 1,
+      pregnancy_number == "pregn_compl_2" ~ 2,
+      pregnancy_number == "pregn_compl_3" ~ 3,
+      pregnancy_number == "pregn_compl_4" ~ 4,
+      pregnancy_number == "pregn_compl_5" ~ 5))
+
+complications <- comp2_long %>%
+  count(record_id, complication_type)%>%
+  filter(!is.na(complication_type))%>%
+  mutate(
+      complication_type = case_when(
+      complication_type == "0" ~ "Preeclampsie",
+      complication_type == "1" ~ "Eclampsie",
+      complication_type == "2" ~ "HELLP")) 
+
+total_compl <- sum(complications$n)
+porc_comp  <-  (total_compl*100)/100 # total pregnancies
+
+## Merge outcome + complications + type of complications
+preg_long <- preg_long %>%
+  left_join(comp2_long,
+            by = c("record_id", "pregnancy_number"))
+
+## Add woman-level predictors
+preg_long <- preg_long %>%
+  left_join(
+    data_pregn %>%
+      select(record_id,
+             sledai_total,
+             slicc_total,
+             nephritis,
+             Antimalarials,
+             Corticosteroids,
+             Mycophenolate,
+             Azatioprine,
+             Menarca,
+             dx_time,
+             cycle_regularity,
+             ectopico_dxmed,
+             socioeconomic_status,
+             enf_hipertensiva_embarazo___1,
+             diabetes_gestacional___1,
+             calculated_age,
+             rep_life),
+    by = "record_id")
+
+preg_long <- preg_long %>%
+  mutate(
+    # outcome
+   outcome = case_when(
+      outcome == "0" ~ "On term",
+      outcome == "1" ~ "Pre-term",
+      outcome == "2" ~ "Pregnancy losses"),
+    # Complication
+   complication = case_when(
+      complication == "0" ~ "No",
+      complication == "1" ~ "Yes",
+      complication == "2" ~ "Unknown"),
+    # Type of complication
+   complication_type = case_when(
+      complication_type == "0" ~ "Preeclampsie",
+      complication_type == "1" ~ "Eclampsie",
+      complication_type == "2" ~ "HELLP"))
+
+ preg_long$complication_type[is.na( preg_long$complication_type)] <- "None"
+
+preg_ev <- preg_long %>%
+  select(pregnancy_number, outcome, complication_type)
+preg_ev
+
+
+
+```
+
+## STEP 4: Plotting pregnancies evolution
+
+```{r}
+### Plot pregnancies evolution
+df_clean <- preg_long %>% 
+  mutate( pregnancy_number = as.character(pregnancy_number),
+          complication_group = case_when( 
+            complication_type == "None" ~ "No complication", 
+            complication_type == "Preeclampsie" ~ "Preeclampsie",
+            complication_type == "Eclampsie" ~ "Eclampsie", 
+            complication_type == "HELLP" ~ "Preeclampsie"), 
+          outcome = case_when( outcome == "On term" ~ "Full term",
+                               outcome == "Pre-term" ~ "Preterm", 
+                               outcome == "Pregnancy losses" ~ "Pregnancy losses", 
+                               TRUE ~ outcome), 
+          pregnancy_number = case_when( 
+            pregnancy_number == "1" ~ "1", 
+            pregnancy_number == "2" ~ "2", 
+            pregnancy_number == "3" ~ "≥3", 
+            pregnancy_number == "4" ~ "≥3", 
+            pregnancy_number == "5" ~ "≥3"))
+
+## Convert to sankey
+sankey_df <- df_clean %>% 
+  make_long(pregnancy_number, complication_type, outcome)
+
+## Plotting
+fig2a <- ggplot(sankey_df, aes(x = x, next_x = next_x, node = node, next_node = next_node, fill = node, label = node)) + 
+  geom_sankey(flow.alpha = 0.6, node.color = "gray30", show.legend = TRUE) + 
+  geom_sankey_label(size = 4, color = "black", fill = "white") + 
+  scale_fill_manual(values = col_palette,
+    breaks = c( "1", "2", "≥3", "No complication", "Preeclampsie", "Other", "Eclampsie","HELLP", "Full term", "Pregnancy losses", "Preterm"), na.value = "grey80") +
+  theme_sankey(base_size = 8) + 
+  labs( title = "A.Outcomes and complications \n across pregnancies", fill = "Category") + 
+  theme_minimal() + 
+  theme( plot.title = element_text(size=14,hjust = 0.5), 
+         axis.text.x = element_blank(),
+         axis.title.x = element_blank(), 
+         axis.text.y = element_blank(), 
+         axis.ticks = element_blank(), 
+         panel.grid = element_blank(), 
+         legend.position = "none")
+
+## Outcomes
+# Compute counts & proportions
+df_summary <- df_clean %>% 
+  dplyr::group_by(pregnancy_number, outcome) %>%
+  dplyr::summarize(n = n(), .groups = "drop") %>%
+  dplyr::group_by(pregnancy_number) %>%
+  dplyr::mutate(prop = n / sum(n))
+
+df_summary <- df_summary %>% 
+  mutate(pregnancy_number = factor(pregnancy_number, levels = c("1", "2", "≥3")))
+
+# Plot counts with proportion labels
+fig2b <- ggplot(df_summary, aes(x = pregnancy_number, y = n, fill = outcome)) + 
+  geom_col(color = "white") + # bars represent counts 
+  geom_text(
+  aes(label = ifelse(prop > 0.05,
+                     percent(prop, accuracy = 1),
+                     "")),
+  position = position_stack(vjust = 0.5),
+  size = 4)+
+            scale_fill_manual(values = col_palette) + 
+              labs( x = "Pregnancy number", y = "Percentage (%)", fill = "Outcome", title = "B.Outcomes" ) +
+              theme_minimal() + 
+              theme( plot.title = element_text(size=14,hjust = 0.5), 
+                    panel.grid = element_blank(),
+                    axis.x.text = element_text(size = 10),
+                    axis.y.text = element_text(size = 10),
+                    legend.position = "bottom",
+                    legend.text = element_text(size = 12),
+                    legend.title = element_text(size = 12),
+                    legend.key.size = unit(0.3, "cm"),
+                    legend.spacing.y = unit(0.05, "cm"))
+
+##Complication 
+# Compute counts & proportions 
+comp_summary <- df_clean %>% 
+  dplyr::group_by(pregnancy_number, complication_type) %>%
+  dplyr::summarize(n = n(), .groups = "drop") %>%
+  dplyr::group_by(pregnancy_number) %>%
+  dplyr::mutate(prop = n / sum(n))
+
+comp_summary <- comp_summary %>% 
+  mutate(pregnancy_number = factor(pregnancy_number, levels = c("1", "2", "≥3")))
+
+# Plot counts with proportion labels
+fig2c <- ggplot(comp_summary, aes(x = pregnancy_number, y = n, fill = complication_type)) +
+  geom_col(color = "white") + # bars represent counts 
+  geom_text(
+  aes(label = ifelse(prop > 0.05, percent(prop, accuracy = 1),"")),
+  position = position_stack(vjust = 0.5),
+  size = 4)+
+            scale_fill_manual(values = col_palette) + 
+  labs( x = "Pregnancy number", y = "Percentage (%)", fill = "Complication", title = "C.Complications" ) + 
+  theme_minimal() + 
+  theme( plot.title = element_text(size=14,hjust = 0.5),
+         panel.grid = element_blank(),
+         axis.x.text = element_text(size = 10),
+         axis.y.text = element_text(size = 10),
+         legend.position = "bottom",
+         legend.text = element_text(size = 12),
+         legend.title = element_text(size = 12),
+         legend.key.size = unit(0.3, "cm"),
+         legend.spacing.y = unit(0.05, "cm"))
+
+## Correlations by number of pregnancies
+vars_corr <- preg_long %>%
+  select(pregnancy_number, cycle_regularity, rep_life, complication_type, outcome,
+         sledai_total, slicc_total,calculated_age, Corticosteroids, Antimalarials, nephritis, dx_time)%>%
+    mutate(
+      outcome = case_when(
+      outcome == "On term" ~ 0,
+      outcome == "Pregnancy losses" ~ 1,
+      outcome == "Pre-term" ~ 0)) %>%
+    mutate(
+      complication_type = case_when(
+      complication_type  == "None" ~ 0,
+      complication_type  == "Eclampsie" ~ 1,
+      complication_type  == "Preeclampsie" ~ 1,
+      complication_type  == "HELLP"~ 1))
+
+vars_corr_clean <- vars_corr %>%
+  select(where(is.numeric)) %>%
+  select(where(~ var(.x, na.rm = TRUE) != 0))
+
+corr_matrix <- cor(
+  vars_corr_clean,
+  method = "spearman",
+  use = "pairwise.complete.obs")
+
+p_matrix <- cor.mtest(vars_corr_clean)$p
+p_adj <- matrix(
+  p.adjust(as.vector(p_matrix), method = "BH"),
+  nrow = nrow(p_matrix))
+p_adj <- as.matrix(p_adj)
+colnames(p_adj) <- colnames(corr_matrix)
+rownames(p_adj) <- rownames(corr_matrix)
+
+# Pvalues long format
+p_long <- as.data.frame(p_adj) %>%
+  rownames_to_column("Var1") %>%
+  pivot_longer(-Var1, names_to = "Var2", values_to = "p")
+
+# Factors without error
+p_long$Var1 <- factor(p_long$Var1, levels = vars_corr)
+p_long$Var2 <- factor(p_long$Var2, levels = vars_corr)
+# Lower triangle
+p_long <- p_long %>%
+  filter(as.numeric(Var1) >= as.numeric(Var2))
+
+# Colnames for corr matrix
+colnames(corr_matrix) <- c(
+  "Pregnancy \n number",
+  "Cycle \n regularity",
+  "Rep life",
+  "Complications",
+  "Outcome",
+  "SLEDAI",
+  "SLICC",
+  "Age",
+  "CC use",
+  "AM use",
+  "Nephritis",
+  "Years since \n diagnosis")
+
+rownames(corr_matrix) <- colnames(corr_matrix)
+
+# Long format
+corr_long <- corr_matrix %>%
+  as.data.frame() %>%
+  rownames_to_column("Var1") %>%
+  pivot_longer(-Var1, names_to = "Var2", values_to = "cor")
+
+# Set order
+vars <- colnames(corr_matrix)
+corr_long <- corr_long %>%
+  mutate(
+    Var1 = factor(Var1, levels = vars),
+    Var2 = factor(Var2, levels = vars))
+
+# Select triangle
+corr_long <- corr_long %>%
+  filter(as.numeric(Var1) >= as.numeric(Var2))
+
+# Plotting
+p <- ggplot(corr_long, aes(x = Var2, y = Var1, fill = cor)) +
+  geom_tile(color = "white", linewidth = 1) +
+  # diagonal values
+  geom_text(
+    data = subset(corr_long, Var1 == Var2),
+    aes(label = sprintf("%.2f", cor)),
+    size = 4) +
+  # values outside diagonal
+  geom_text(
+    data = subset(corr_long, Var1 != Var2),
+    aes(label = sprintf("%.2f", cor)),
+    size = 4) +
+  scale_fill_gradient2(
+    low = "#7b3294",
+    mid = "#f7f7f7",
+    high = "#de77ae",
+    midpoint = 0,
+    limits = c(-1, 1),
+    name = "cor") +
+  coord_fixed() +
+  labs(
+    title = "D. Correlation matrix of clinical variables",
+    x = NULL,
+    y = NULL) +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.text.x = element_text(size= 12, angle = 45, hjust = 1),
+    axis.text.y = element_text(size= 12, hjust = 1),
+    panel.grid = element_blank(),
+     plot.title = element_text(size=14,hjust = 0.5),
+    legend.position = "right",
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 12),
+    legend.key.size = unit(0.3, "cm"),
+    legend.spacing.y = unit(0.05, "cm"))
+
+# Add pvalues
+if (exists("p_adj")) {
+  p_long <- p_adj %>%
+    as.data.frame() %>%
+    rownames_to_column("Var1") %>%
+    pivot_longer(-Var1, names_to = "Var2", values_to = "p") %>%
+    mutate(
+      Var1 = factor(Var1, levels = vars),
+      Var2 = factor(Var2, levels = vars)
+    ) %>%
+    filter(as.numeric(Var1) >= as.numeric(Var2))
+  
+fig2d <- p + geom_text(
+  data = subset(p_long, p > 0.05),
+  aes(x = Var2, y = Var1),
+  label = "×",
+  size = 6,
+  color = "black",
+  inherit.aes = FALSE
+)}
+fig2d
+
+fig2bc <- plot_grid(
+  fig2b, fig2c,
+  ncol = 2)
+
+middle <- plot_grid(
+  NULL, fig2bc, NULL,
+  ncol = 3,
+  rel_widths = c(1, 4, 1))
+
+fig2 <- plot_grid(
+  fig2a,
+  middle,
+  fig2d,
+  ncol = 1,
+  rel_heights = c(1.5, 1.5, 2.5),
+  rel_widths = c(1,1,3))
+
+## Save plot as png
+ggsave(filename= "~/Documents/R/Reproductive_Health/Figures/Fig2.png", plot= fig2, width = 15, height = 16, dpi=300, units = "in", bg = "white" ) 
+
+```
+
+## STEP 5: Descriptive analysis
+
+```{r}
+preg_desc<- df_clean %>% 
+  mutate(pregnancy_number = replace(pregnancy_number, pregnancy_number== "≥3", "3"))
+
+## Descriptive by pregnancy number
+table_2 <- preg_desc %>% 
+  tbl_summary(
+    by= pregnancy_number, 
+    include = c(calculated_age, rep_life, outcome, complication, complication_type, sledai_total, nephritis, Antimalarials, Corticosteroids,
+    Mycophenolate))%>%  
+  add_p() %>% 
+  add_overall() %>%
+  add_n() %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_spanning_header(c("stat_1", "stat_2","stat_3") ~ "**Number of pregnancies**") %>%
+  modify_footnote_header("Median (IQR) or Frequency (%)", columns = all_stat_cols()) %>%
+  modify_caption("**Table 2. Volunteers' characteristics by number of pregnancies**") %>%
+  bold_labels()
+gt::gtsave(as_gt(table_2), "Table2_Pregnancy_history.docx")
+
+
+## Descriptive by outcome
+table_3 <- df_clean %>% 
+  tbl_summary(
+    by= outcome, 
+    include = c(calculated_age, rep_life, sledai_total, nephritis, Antimalarials, Corticosteroids,
+    Mycophenolate, complication_type))%>%  
+  add_p() %>% 
+  add_overall() %>%
+  add_n() %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_spanning_header(c("stat_1", "stat_2", "stat_3") ~ "**Outcome of pregnancy**") %>%
+  modify_footnote_header("Median (IQR) or Frequency (%)", columns = all_stat_cols()) %>%
+  modify_caption("**Table 3. Volunteers' characteristics by outcome of pregnancy**") %>%
+  bold_labels()
+gt::gtsave(as_gt(table_3), "Table3_Outcome.docx")
+
+## Descriptive by complications
+compl_table  <- df_clean %>% 
+  filter(complication != "Unknown")
+
+table_4 <- compl_table %>% 
+  tbl_summary(
+    by= complication, 
+    include = c(calculated_age, rep_life, sledai_total, nephritis, Antimalarials, Corticosteroids,
+    Mycophenolate))%>%  
+  add_p() %>% 
+  add_overall() %>%
+  add_n() %>%
+  modify_header(label ~ "**Variable**") %>%
+  modify_spanning_header(c("stat_1", "stat_2") ~ "**Development of complications**") %>%
+  modify_footnote_header("Median (IQR) or Frequency (%)", columns = all_stat_cols()) %>%
+  modify_caption("**Table 4. Volunteers' characteristics by complications during pregnancy**") %>%
+  bold_labels()
+gt::gtsave(as_gt(table_4), "Table4_Complications.docx")
+
+
+```
+
+## STEP 6: Regression analyses
+
+```{r}
+## Complications
+# Prepare dataframe
+df_model <- df_clean %>%
+  mutate(
+    complication_binary = ifelse(complication == "Yes", 1, 0),
+    outcome_binary = ifelse(outcome %in% c("Abortion", "Preterm"), 1, 0),
+    nephritis = factor(nephritis),
+    Antimalarials = factor(Antimalarials),
+    Corticosteroids = factor(Corticosteroids),
+    Mycophenolate = factor(Mycophenolate),
+    Azatioprine = factor(Azatioprine),
+    Enf_hip = factor(enf_hipertensiva_embarazo___1),
+    diabetes= factor(diabetes_gestacional___1),
+    cycle_regularity = factor(cycle_regularity),
+    pregnancy_number = factor(pregnancy_number),
+    rep_life = factor(rep_life))
+
+df_model$Menarca <- as.numeric(as.character(df_model$Menarca))
+df_model$socioeconomic_status <- as.numeric(as.character(df_model$socioeconomic_status))
+df_model$dx_time <- as.numeric(as.character(df_model$dx_time))
+df_model$dx_time <- as.numeric(as.character(df_model$dx_time))
+df_model$rep_life <- as.numeric(as.character(df_model$rep_life))
+
+# Model
+model_comp <- glm(complication_binary ~ 
+    calculated_age +
+    rep_life+
+    sledai_total +
+    slicc_total+
+    #cycle_regularity+
+    #Azatioprine+
+    Antimalarials +
+    Menarca+
+    socioeconomic_status+
+    dx_time+
+    Corticosteroids,
+  data = df_model,
+  family = binomial())
+
+table_model <- tidy(model_comp, exponentiate = TRUE, conf.int = TRUE) %>%
+  mutate(
+    OR = estimate,
+    CI = paste0("(", round(conf.low, 2), "–", round(conf.high, 2), ")")
+  ) %>%
+  select(term, OR, CI, p.value)
+table_model
+
+## Polish table
+table_model_clean <- table_model %>%
+  mutate(
+    OR = round(OR, 2),
+    p.value = round(p.value, 3))
+table_model_clean
+
+## Prepare data for forest plot
+forest_df <- tidy(model_comp,
+                  exponentiate = TRUE,
+                  conf.int = TRUE) %>%
+  filter(term != "(Intercept)")
+
+forest_df$term <- factor(forest_df$term,
+                         levels = rev(forest_df$term))
+
+## Outcomes
+# Model
+model_comp_out <- glm(outcome_binary ~ 
+    calculated_age +
+    rep_life+
+    sledai_total +
+    slicc_total +
+    #Azatioprine+
+    Antimalarials +
+    Menarca+
+    socioeconomic_status+
+    dx_time +
+    Corticosteroids,
+  data = df_model,
+  family = binomial())
+
+table_model_out <- tidy(model_comp_out, exponentiate = TRUE, conf.int = TRUE) %>%
+  mutate(
+    OR = estimate,
+    CI = paste0("(", round(conf.low, 2), "–", round(conf.high, 2), ")")
+  ) %>%
+  select(term, OR, CI, p.value)
+table_model_out
+
+## Polish table
+table_model_clean_out <- table_model_out %>%
+  mutate(
+    OR = round(OR, 2),
+    p.value = round(p.value, 3)
+  )
+table_model_clean_out
+
+## Prepare data for forest plot
+forest_out <- tidy(model_comp_out,
+                  exponentiate = TRUE,
+                  conf.int = TRUE) %>%
+  filter(term != "(Intercept)")
+
+forest_out$term <- factor(forest_out$term,
+                         levels = rev(forest_out$term))
+
+##Clean labels names
+clean_labels <- c(
+  calculated_age = "Age",
+  sledai_total = "SLEDAI score",
+  slicc_total = "SLICC damage index",
+  Antimalarials1 = "Antimalarial use",
+  Corticosteroids1 = "Corticosteroid use",
+  Azatioprine1 = "Azathioprine use",
+  Menarca = "Age at menarche",
+  socioeconomic_status = "Socioeconomic status",
+  dx_time = "Disease duration",
+  rep_life = "Reproductive life")
+
+## Join datasets models
+forest_df$model <- "Complications"
+forest_out$model <- "Pregnancy outcomes"
+
+forest_all <- bind_rows(
+  tidy(model_comp, exponentiate = TRUE, conf.int = TRUE) %>%
+    mutate(model = "Complications"),
+  tidy(model_comp_out, exponentiate = TRUE, conf.int = TRUE) %>%
+    mutate(model = "Pregnancy outcomes")) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    stars = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01  ~ "**",
+      p.value < 0.05  ~ "*",
+      TRUE ~ ""),
+    label = paste0(
+      round(estimate, 2),
+      stars))
+
+forest_all$term <- recode(forest_all$term, !!!clean_labels)
+
+forest_all <- forest_all %>%
+  mutate( OR_label = sprintf("%.2f", estimate))  # round OR to 2 decimals)
+
+fig3 <- ggplot(forest_all,
+       aes(x = estimate,
+           y = term)) +
+  geom_point(size = 3, shape = 16, color = "#7A3E9D") +
+  geom_errorbarh(
+    aes(xmin = conf.low, xmax = conf.high),
+    height = 0.2,
+    color = "#7A3E9D") +
+  geom_vline(
+    xintercept = 1,
+    linetype = "dashed",
+    color = "gray40") +
+  geom_text(
+    aes(label = stars),
+    nudge_x = 0.15,
+    size = 5,
+    fontface = "bold") +
+  geom_text(
+    aes(label = OR_label),
+    nudge_x = 0.7,       # move OR labels to the right a bit
+    size = 4,
+    color = "black") +
+  scale_x_log10() +
+  facet_wrap(~model, ncol = 1) +
+  theme_classic(base_size = 14) +
+  theme(
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold"),
+    axis.line.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank()) +
+  labs(x = "Odds Ratio (log scale)")
+
+## Save plot as png
+ggsave(filename= "~/Documents/R/Reproductive_Health/Figures/Fig3.png", plot= fig4, width = 5, height = 5, dpi=300, units = "in", bg = "white" ) 
+```
+
+## 

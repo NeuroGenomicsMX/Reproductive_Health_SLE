@@ -1,0 +1,312 @@
+---
+title: "3.Pregnancy history analysis"
+format: html
+editor: visual
+---
+
+## STEP 1: Loading required packages and reading database
+
+```{r }
+#| label: loading packages
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(UpSetR)
+library(cowplot)
+library(reshape2)
+library(visdat)
+library(gtsummary)
+library(gt)
+library(patchwork)
+library(tidyr)
+library(scales)
+library(broom)
+library(ggsankey)
+library(Hmisc)
+library(lubridate)
+
+#data_curated is recovered from script 01_descriptives.qmd
+
+# Set the color palette for specific sub-ancestries, using https://colorbrewer2.org/#type=diverging&scheme=BrBG&n=9 colorblind options
+col_palette  <- c(
+  "#2C6BA0", "#E9C46A", "#C1121F",
+  "#F4A261", "#B22222","#E76F51","#e0ecf4",
+  "#2A9D8F","#E6D3A3", "#C7B8EA"
+)
+
+names(col_palette) <- c(
+  "Full term", "Pregnancy losses","Preterm",
+  "Preeclampsie","Eclampsie","HELLP", "None",
+  "1","2","≥3")
+scales::show_col(col_palette)
+
+```
+
+## STEP 2. Selecting and filtering data of interest
+
+```{r Selecting and filtering data of interest }
+data_pregn2 <- data_curated  %>%
+  select(
+    #Demographic data
+    record_id, lupus, calculated_age, salud_reproductiva_timestamp,dx_age, time_symptoms,
+    #Reproductive health 
+      # pregn_end how pregnancy ended
+      # pregn_end_date date in which pregnancy ended
+      # preeclampsie if there were any complication
+      # pregn_compl which complication 
+      # pregn_compl_time month in which the complication happened 
+    pregnancies_number, # Number of previous pregnancies
+    pregnancies, #Previous pregnancies
+    pregn_end, pregn_end_date, preeclampsie, pregn_compl, pregn_compl_time, 
+    pregn_end_2, pregn_end_date_2,preeclampsie_2, pregn_compl_2, pregn_compl_time_2,
+    pregn_end_3, pregn_end_date_3, preeclampsie_3, pregn_compl_3, pregn_compl_time_3, 
+    pregn_end_4, pregn_end_date_4, preeclampsie_4, pregn_compl_4, pregn_compl_time_4,
+    pregn_end_5, pregn_end_date_5, preeclampsie_5,pregn_compl_5, pregn_compl_time_5) %>%
+  filter(pregnancies == "1") %>%
+  filter(lupus == "1")
+
+
+```
+
+## STEP 3: Information regarding pregnancies
+
+```{r}
+## Convert pregnancy outcome to long format
+data_pregn2 <- data_pregn2 %>%
+  rename(
+    pregn_end_1 = pregn_end,
+    pregn_end_date_1 = pregn_end_date,
+    preeclampsie_1 = preeclampsie,
+    pregn_compl_1 = pregn_compl,
+    pregn_compl_time_1 = pregn_compl_time)
+
+# Pass to a long format
+df_long <- data_pregn2 %>%
+  pivot_longer(
+    cols = matches("pregn_|preeclampsie"),
+    names_to = c(".value", "pregnancy"),
+    names_sep = "_(?=[0-9]+$)")
+
+# Remove empty pregnancies
+df_long <- df_long %>%
+  filter(!is.na(pregn_end))%>%
+  mutate(
+      pregn_end = case_when(
+      pregn_end == "0" ~ "Born",
+      pregn_end == "1" ~ "Born",
+      pregn_end == "2" ~ "Pregnancy loss"),)
+
+# Calculate time relative to diagnosis
+df_long <- df_long %>%
+  mutate(
+    pregn_end_date = as.Date(pregn_end_date),
+    age_pregnancy =
+      calculated_age -
+      as.numeric(difftime(salud_reproductiva_timestamp,
+                          pregn_end_date,
+                          units = "days")) / 365.25,
+    time_from_dx = age_pregnancy - dx_age)
+
+df_long <- df_long %>%
+  mutate(
+    complication_group = ifelse(
+      pregn_compl == "None" | is.na(pregn_compl),
+      "No complication",
+      "Complication")) %>%
+  mutate(
+  time_symptoms = recode(
+    time_symptoms,
+    `0` = "0.25",
+    `1` = "0.75",
+    `2` = "1",
+    `3` = "2",
+    `4` = "3",
+    `5` = "4",
+    `6` = "5",
+    `7` = "10"))
+
+# Calculate first pregnancy timing
+df_long <- df_long %>%
+  group_by(record_id) %>%
+  mutate(first_preg = min(time_from_dx, na.rm = TRUE)) %>%
+  ungroup()
+
+# Order volunteers by pregnancy timing
+df_long <- df_long %>%
+  arrange(first_preg) %>%
+  mutate(record_id = factor(record_id, levels = unique(record_id)))
+
+# To check times between pregnancy and diagnosis 
+summary(df_long$time_from_dx)
+range(df_long$time_from_dx, na.rm = TRUE)
+
+df_long %>%
+  select(record_id,
+         dx_age,
+         calculated_age,
+         pregn_end_date,
+         salud_reproductiva_timestamp,
+         time_from_dx,
+         time_symptoms)
+
+df_long <- df_long %>%
+  mutate(
+    pregnancy_age =
+      calculated_age -
+      as.numeric(difftime(
+        salud_reproductiva_timestamp,
+        pregn_end_date,
+        units = "days" )) / 365.25)
+
+summary(df_long$pregnancy_age)
+
+## Estimate number of pregnancies before/after diagnosis
+df_long %>%
+  select(record_id, pregnancy_age, pregn_end_date)
+
+df_pregn_age <- df_long %>%
+  select(record_id, age_pregnancy, dx_age) %>%
+  mutate(preg_after_dx = if_else(age_pregnancy > dx_age, "After", "Before"))
+df_pregn_age  %>% count(preg_after_dx)
+
+## Estimate number of pregnancies before/after symptoms onset
+df_long %>%
+  mutate(
+    time_symptoms = as.numeric(time_symptoms),
+    age_symptom_onset = dx_age - time_symptoms,
+    preg_after_symptoms = if_else(age_pregnancy > age_symptom_onset,"After symptoms", "Before symptoms")) %>%
+  count(preg_after_symptoms)
+
+### Data complete
+# Calculate age at the first symptoms
+df_pregn_compl <- df_long %>%
+  mutate(time_symptoms= as.numeric(time_symptoms))
+
+df_pregn_compl  <- df_pregn_compl %>%
+  mutate(time_symptoms_dx = -time_symptoms)
+
+pregn_hist_compl <- ggplot(df_pregn_compl ,
+      aes(x = time_from_dx,
+           y = factor(record_id))) +
+  geom_line(aes(group = record_id),
+            color = "grey80",
+            linewidth = 0.6) +
+  geom_point(aes(fill = pregn_end,
+                 shape = complication_group),
+             size = 3,
+             color = "black",
+             stroke = 0.7) +
+  geom_point(aes(x = time_symptoms_dx,
+        y = factor(record_id),
+        shape = "Symptom onset"),
+    size = 3,
+    color = "black",
+    fill="#92c5de" ) +
+  geom_vline(xintercept = 0,
+             linetype = "dashed") +
+  guides(
+  fill = guide_legend(override.aes = list(shape = 21)))+
+  scale_fill_manual(values = c(
+    "Born" = "#af8dc3",
+    "Pregnancy loss" = "#99d594")) +
+  scale_shape_manual(values = c(
+    "No complication" = 24,
+    "Complication" = 22,
+    "Symptom onset" = 21)) +
+  labs(
+    x = "Years relative to SLE diagnosis",
+    y = "Volunteer",
+    fill = "Pregnancy outcome",
+    shape = "Event") +
+  theme_classic()+
+  theme(
+  axis.text.y = element_blank(),
+  axis.ticks.y = element_blank(),
+  axis.text.x = element_text(size = 12),   
+  axis.title.x = element_text(size = 14),  
+  axis.title.y = element_text(size = 14),
+  legend.text = element_text(size = 12),   
+  legend.title = element_text(size = 13))+
+  annotate(
+  "rect",
+  xmin = min(df_long$time_from_dx),
+  xmax = 0,
+  ymin = -Inf,
+  ymax = Inf,
+  fill = "grey95")
+
+ggsave(filename= "~/Documents/R/Reproductive_Health/SuppFigures/SupplFig2.png", plot= pregn_hist_compl, width = 10, height = 10, dpi=300, units = "in", bg = "white" )
+
+### History of pregnancies in volunteers who experienced pregnancy complications and/or pregnancy loss 
+df_risk <- df_long %>%
+  group_by(record_id) %>%
+  filter(any(pregn_end == "Pregnancy loss" |
+             complication_group == "Complication")) %>%
+  ungroup()
+
+# Calculate age at the first symptoms
+df_risk <- df_risk %>%
+  mutate(time_symptoms= as.numeric(time_symptoms))
+
+df_risk <- df_risk %>%
+  mutate(time_symptoms_dx = -time_symptoms)
+
+
+pregn_history <- df_risk %>%
+  select(time_from_dx, record_id, pregn_end, complication_group, time_symptoms_dx)%>%
+   filter(!is.na(pregn_end))%>%
+  na.omit() # to eliminate records where information is missing
+
+fig4  <- ggplot(pregn_history,
+      aes(x = time_from_dx,
+           y = factor(record_id))) +
+  geom_line(aes(group = record_id),
+            color = "grey80",
+            linewidth = 0.6) +
+  geom_point(aes(fill = pregn_end,
+                 shape = complication_group),
+             size = 3,
+             color = "black",
+             stroke = 0.7) +
+  geom_point(aes(x = time_symptoms_dx,
+        y = factor(record_id),
+        shape = "Symptom onset"),
+    size = 3,
+    color = "black",
+    fill="#92c5de" ) +
+  geom_vline(xintercept = 0,
+             linetype = "dashed") +
+  guides(
+  fill = guide_legend(override.aes = list(shape = 21)))+
+  scale_fill_manual(values = c(
+    "Born" = "#af8dc3",
+    "Pregnancy loss" = "#99d594")) +
+  scale_shape_manual(values = c(
+    "No complication" = 24,
+    "Complication" = 22,
+    "Symptom onset" = 21)) +
+  labs(
+    x = "Years relative to SLE diagnosis",
+    y = "Volunteer",
+    fill = "Pregnancy outcome",
+    shape = "Event") +
+  theme_classic()+
+  theme(
+  axis.text.y = element_blank(),
+  axis.ticks.y = element_blank(),
+  axis.text.x = element_text(size = 12),   
+  axis.title.x = element_text(size = 14),  
+  axis.title.y = element_text(size = 14),
+  legend.text = element_text(size = 12),   
+  legend.title = element_text(size = 13))+
+  annotate(
+  "rect",
+  xmin = min(df_long$time_from_dx),
+  xmax = 0,
+  ymin = -Inf,
+  ymax = Inf,
+  fill = "grey95")
+
+## Save plot as png
+ggsave(filename= "~/Documents/R/Reproductive_Health/Figures/Fig4.png", plot= fig4, width = 10, height = 10, dpi=300, units = "in", bg = "white" )
+```
