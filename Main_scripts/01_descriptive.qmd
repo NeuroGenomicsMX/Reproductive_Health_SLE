@@ -22,8 +22,7 @@ library(gt)
 library(mxmaps)
 library(eeptools)
 
-Data <- read.csv("Base_Enero2026.csv", header=TRUE)
-
+Data <- read.csv("~/Documents/R/Reproductive_Health/Base_Enero2026.csv", header=TRUE)
 
 ```
 
@@ -87,9 +86,9 @@ data_curated$time_since_last_period <- data_curated$calculated_age - data_curate
 # Calculte reproductive life
 data_curated$rep_life <- data_curated$last_period_age - data_curated$Menarca
 
-# Identify those with at least a year since their last period (amenhorrea)
+# Identify those with at least a year since their last period (Menopause)
 data_curated<- data_curated %>%
-  mutate(menst_status = (if_else(time_since_last_period >=1, "Amenhorrea", "Menstruating"))) 
+  mutate(menst_status = (if_else(time_since_last_period >=1, "Menopause", "Menstruating"))) 
 
 # Check data: to see if there are any biological unlikely results in rep_life
 data_replife <- data_curated %>%
@@ -99,22 +98,22 @@ data_curated<- data_curated %>%
   filter(rep_life > 0) # To eliminate any negative value
 
 # Classify according to menstruation status
-data_amenh_age <- data_curated %>%
-  filter(menst_status == "Amenhorrea")%>%
+data_menopause_age <- data_curated %>%
+  filter(menst_status == "Menopause")%>%
   select(calculated_age, last_period_age)
 
 # Calculate age at last period for those with amenhorrea
-median_lpa <- median(data_amenh_age$last_period_age)
+median_lpa <- median(data_menopause_age$last_period_age)
 median_lpa
-IQR_lpa <-quantile(data_amenh_age$last_period_age)
+IQR_lpa <-quantile(data_menopause_age$last_period_age)
 IQR_lpa
 
 # Identify early-amenhorea
-data_curated$amenh  <- data_curated$calculated_age - data_curated$last_period_age
+data_curated$menopause  <- data_curated$calculated_age - data_curated$last_period_age
 data_curated <- data_curated%>%
-  mutate(amenh = replace(amenh, amenh >= 1 & last_period_age < 40, "Early-Amenhorrea")) %>%
-  mutate(amenh = replace(amenh, amenh >= 1 & last_period_age >= 40, "Amenhorrea")) %>%
-  mutate(amenh  = replace(amenh, amenh < 1, "Menstruating")) 
+  mutate(menopause = replace(menopause, menopause >= 1 & last_period_age < 40, "Early-Menopause")) %>%
+  mutate(menopause = replace(menopause, menopause >= 1 & last_period_age >= 40, "Menopause")) %>%
+  mutate(menopause = replace(menopause, menopause < 1, "Menstruating")) 
 
 ```
 

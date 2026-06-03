@@ -1,5 +1,5 @@
 ---
-title: "4.Early amenhorrea analysis"
+title: "4.Early menopause analysis"
 format: html
 editor: visual
 ---
@@ -26,7 +26,7 @@ library(logistf)
 ## STEP 2. Selecting and filtering data of interest
 
 ```{r Selecting and filtering data of interest }
-data_amen<- data_curated  %>%
+data_men<- data_curated  %>%
   select(
     #Outcomes
     last_period_age, 
@@ -37,7 +37,7 @@ data_amen<- data_curated  %>%
     #Clinical data
     nephritis, dx_time, time_symptoms,
     #Reproductive health
-    Menarca,pregnancies, last_period, last_period_age, amenh, histerectomy, menst_status, ooforectomy,
+    Menarca,pregnancies, last_period, last_period_age, menopause, histerectomy, menst_status, ooforectomy,
     #SLEDAI
     sledai_total,
     #SLICC
@@ -48,20 +48,20 @@ data_amen<- data_curated  %>%
 ## STEP 3: Descriptive analysis
 
 ```{r}
-data_amen_clean <- data_amen %>%
+data_men_clean <- data_men %>%
   filter(
     histerectomy == 0,
     ooforectomy == 0
   )
 
 ## Descriptive by menstruation status
-table5 <- data_amen_clean %>% 
+table5 <- data_men_clean %>% 
   tbl_summary(
-    by= amenh, 
+    by= menopause, 
     include = c(last_period_age,calculated_age, socioeconomic_status, adic_tabaco___1, 
                 bmi, Corticosteroids, Antimalarials,Mycophenolate, Cyclophosphamide,
                 Azatioprine, Rituximab, pred_dosis, nephritis, dx_time, time_symptoms,
-                Menarca,pregnancies, last_period_age, amenh,
+                Menarca,pregnancies, last_period_age,menopause,
                 sledai_total, slicc_total))%>%  
   add_p() %>% 
   add_overall() %>%
@@ -75,23 +75,23 @@ gt::gtsave(as_gt(table5), "Table5_MenstruationStatus.docx")
 
 ```
 
-## STEP 4: Analyses for early amenorrhea
+## STEP 4: Analyses for early menopause
 
 ```{r}
 ## Disease duration by menstrual status
-df_dxtime <- data_amen_clean %>%
-  filter(amenh %in% c("Menstruating", 
-                      "Early-Amenhorrea", 
-                      "Amenhorrea")) %>%
-  mutate(amenh = factor(amenh,
+df_dxtime <- data_men_clean %>%
+  filter(menopause %in% c("Menstruating", 
+                      "Early-Menopause", 
+                      "Menopause")) %>%
+  mutate(menopause = factor(menopause,
                    levels = c("Menstruating",
-                              "Early-Amenhorrea",
-                              "Amenhorrea"),
+                              "Early-Menopause",
+                              "Menopause"),
                    labels = c("Menstruating",
-                              "Early\namenorrhea",
-                              "Amenorrhea")))
+                              "Early\ Menopause",
+                              "Menopause")))
 
-fig5a <- ggplot(df_dxtime, aes(x = amenh, y = dx_time)) +
+fig5a <- ggplot(df_dxtime, aes(x = menopause, y = dx_time)) +
   geom_boxplot(width = 0.6, outlier.shape = NA) +
   geom_jitter(width = 0.15, alpha = 0.4, size = 2) +
   theme_classic(base_size = 14) +
@@ -106,13 +106,13 @@ fig5a
 
 ## Primary analysis: penalized logistic regression (Firth model)
 # Prepare database
-df_model <- data_amen_clean %>%
-  filter(amenh %in% c("Menstruating", "Early-Amenhorrea")) %>%
-  mutate(early_amenorrhea_binary = ifelse(amenh== "Early-Amenhorrea", 1, 0))
+df_model <- data_men_clean %>%
+  filter(menopause %in% c("Menstruating", "Early-Menopause")) %>%
+  mutate(early_menopause_binary = ifelse(menopause== "Early-Menopause", 1, 0))
 
 # Run model 
 model_firth <- logistf(
-  early_amenorrhea_binary ~ dx_time + calculated_age,
+  early_menopause_binary ~ dx_time + calculated_age,
   data = df_model)
 
 summary(model_firth)
@@ -158,7 +158,7 @@ fig5b <- ggplot(coef_df,
   labs(
     x = "Adjusted odds ratio (log scale)",
     y = "",
-    title = "B. Factors associated  \n with early amenorrhea") +
+    title = "B. Factors associated  \n with early menopause") +
    theme(
     strip.background = element_blank(),
     strip.text = element_text(face = "bold"),
@@ -196,8 +196,8 @@ fig5c <- ggplot(newdata, aes(x = dx_time, y = prob)) +
   theme_classic(base_size = 14) +
   labs(
     x = "Disease duration (years)",
-    y = "Predicted probability \n of early amenorrhea",
-    title = "C. Predicted probability of early amenorrhea by disease duration \n (age fixed at mean)") +
+    y = "Predicted probability \n of early menopause",
+    title = "C. Predicted probability of early menopause by disease duration \n (age fixed at mean)") +
   theme(
     plot.title = element_text(face = "bold"))
 fig5c
@@ -213,7 +213,7 @@ ggsave(filename= "~/Documents/R/Reproductive_Health/Figures/Fig5.png", plot= fig
 ## Sensitivity analysis: Standard logistic regression
 # Unadjusted model
 model_unadj <- glm(
-  early_amenorrhea_binary ~ dx_time,
+  early_menopause_binary ~ dx_time,
   family = binomial(),
   data = df_model)
 
@@ -223,7 +223,7 @@ exp(cbind(
 
 # Age-adjusted model
 model_adj_age <- glm(
-  early_amenorrhea_binary ~ dx_time + calculated_age,
+  early_menopause_binary ~ dx_time + calculated_age,
   family = binomial(),
   data = df_model)
 
